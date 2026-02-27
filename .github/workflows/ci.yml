@@ -1,0 +1,114 @@
+# CI for Council -- advisory layer (docs-only repo).
+#
+# Runs format checking, markdown linting, prose analysis, link checking,
+# and test suites on push to main and on pull requests.
+#
+# Skips links-external (cross-repo references won't resolve in CI) and
+# the integration test (depends on cred-broker/git-proxy libs not in this repo).
+
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  check:
+    name: Lint, Prose & Test
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+
+      - name: Cache npm
+        uses: actions/cache@v4
+        with:
+          path: ~/.npm
+          key: npm-${{ runner.os }}
+          restore-keys: npm-${{ runner.os }}
+
+      - name: Install Node tools
+        run: npm install -g prettier markdownlint-cli
+
+      - name: Install vale
+        run: |
+          bash -c '
+            VALE_VERSION="3.9.5"
+            curl -fsSL "https://github.com/errata-ai/vale/releases/download/v${VALE_VERSION}/vale_${VALE_VERSION}_Linux_64-bit.tar.gz" \
+              | tar xz -C /usr/local/bin vale
+            vale --version
+          '
+
+      - name: Cache vale styles
+        uses: actions/cache@v4
+        with:
+          path: .vale/styles
+          key: vale-${{ runner.os }}-${{ hashFiles('.vale.ini') }}
+          restore-keys: vale-${{ runner.os }}-
+
+      - name: Sync vale packages
+        run: vale sync
+
+      - name: Install lychee
+        run: |
+          bash -c '
+            LYCHEE_VERSION="0.18.0"
+            curl -fsSL "https://github.com/lycheeverse/lychee/releases/download/lychee-v${LYCHEE_VERSION}/lychee-v${LYCHEE_VERSION}-x86_64-unknown-linux-gnu.tar.gz" \
+              | tar xz -C /usr/local/bin lychee
+            lychee --version
+          '
+
+      - name: Format check
+        run: |
+          bash -c '
+            prettier --write "**/*.md" --ignore-path .gitignore
+            if ! git diff --exit-code; then
+              echo "::error::Unformatted files detected. Run: make format"
+              exit 1
+            fi
+          '
+
+      - name: Lint
+        run: bash -c 'markdownlint "**/*.md" --ignore .vale'
+
+      - name: Prose
+        run: bash -c 'vale *.md */*.md'
+
+      - name: Links (internal)
+        run: bash -c 'lychee --offline "**/*.md"'
+
+      - name: Test -- marshal hook
+        run: bash tests/test-marshal-hook.sh
+
+      - name: Test -- orchestration contracts
+        run: bash tests/test-orchestration.sh
+
+  build:
+    name: Astro Build
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Build site
+        run: npm run build

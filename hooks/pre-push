@@ -1,0 +1,18 @@
+#!/bin/bash
+# EXPERIMENTAL: Cross-repo link validation on push
+
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+PROJECT_DIR="$(cd "$SCRIPT_DIR/../.." && pwd)"
+CHECK_SCRIPT="$PROJECT_DIR/scripts/check-cross-repo-links.sh"
+
+if [[ ! -x "$CHECK_SCRIPT" ]]; then
+    echo "Warning: cross-repo link checker not found at $CHECK_SCRIPT"
+    echo "Skipping cross-repo link validation."
+    exit 0
+fi
+
+echo "Running cross-repo link check..."
+if ! bash "$CHECK_SCRIPT"; then
+    echo "Cross-repo link check failed. Fix broken references before pushing."
+    exit 1
+fi

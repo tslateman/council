@@ -1,0 +1,45 @@
+#!/bin/bash
+
+# Format markdown files
+prettier --write '**/*.md' --ignore-path .gitignore >/dev/null 2>&1
+
+# Re-stage any formatted files
+git diff --name-only | grep '\.md$' | xargs -r git add
+
+# Run markdownlint
+if ! markdownlint '**/*.md' --ignore .vale --ignore node_modules --ignore plans --ignore dist; then
+    echo "markdownlint failed. Fix errors before committing."
+    exit 1
+fi
+
+# Run vale
+if ! vale *.md */*.md; then
+    echo "vale failed. Fix prose issues before committing."
+    exit 1
+fi
+
+# Check internal links
+if ! lychee --offline '**/*.md' --exclude-path src/content/docs --exclude-path node_modules --exclude-path dist --exclude-path plans 2>/dev/null; then
+    echo "Broken links found. Fix before committing."
+    exit 1
+fi
+
+# Record seat and initiative changes to Lore (graceful degradation)
+DEV_ROOT="${DEV_ROOT:-$HOME/dev}"
+LORE="$DEV_ROOT/lore/lore.sh"
+if [[ -x "$LORE" ]]; then
+    git diff --cached --name-only | grep -E '^(critic|marshal|mainstay|ambassador|wayfinder|mentor|initiatives)/.+\.md$' | while read -r changed_file; do
+        title=$(head -1 "$changed_file" 2>/dev/null | sed 's/^#* *//')
+        [[ -z "$title" ]] && continue
+        seat=$(dirname "$changed_file")
+        "$LORE" observe "$title" --source "council/$changed_file" --tags "$seat" 2>/dev/null || true
+    done
+
+    # Summarize council changes for the next session
+    changed_seats=$(git diff --cached --name-only | grep -oE '^(critic|marshal|mainstay|ambassador|wayfinder|mentor)' | sort -u | paste -sd, -)
+    changed_initiatives=$(git diff --cached --name-only | grep '^initiatives/' | sed 's|initiatives/||;s|\.md||' | paste -sd, -)
+
+    if [[ -n "$changed_seats" || -n "$changed_initiatives" ]]; then
+        "$LORE" handoff "Council commit: seats=[${changed_seats:-none}] initiatives=[${changed_initiatives:-none}]" 2>/dev/null || true
+    fi
+fi

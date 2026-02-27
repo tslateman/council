@@ -1,0 +1,9 @@
+.vale/styles/
+.flow/
+.aoe/
+.research/
+plans/
+node_modules/
+dist/
+.astro/
+src/content/docs/
